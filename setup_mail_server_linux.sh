@@ -34,7 +34,7 @@ execute_ssh "hostnamectl set-hostname mail.$DOMAIN_NAME"
 
 # 4. 安装必要软件
 echo "3. 安装必要软件..."
-execute_ssh "DEBIAN_FRONTEND=noninteractive apt install -y postfix dovecot-imapd dovecot-pop3d certbot nginx"
+execute_ssh "DEBIAN_FRONTEND=noninteractive apt install -y postfix dovecot-imapd dovecot-pop3d certbot nginx iptables-persistent"
 
 # 5. 配置Postfix
 echo "4. 配置Postfix..."
@@ -76,6 +76,57 @@ mailbox_size_limit = 1073741824
 mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128"
 
 execute_ssh "echo '$POSTFIX_CONFIG' > /etc/postfix/main.cf"
+
+# 配置master.cf
+echo "配置Postfix master.cf..."
+POSTFIX_MASTER_CONFIG="smtp      inet  n       -       y       -       -       smtpd
+submission inet n       -       y       -       -       smtpd
+  -o syslog_name=postfix/submission
+  -o smtpd_tls_security_level=encrypt
+  -o smtpd_sasl_auth_enable=yes
+  -o smtpd_tls_auth_only=yes
+  -o smtpd_reject_unlisted_recipient=no
+  -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
+  -o milter_macro_daemon_name=ORIGINATING
+smtps     inet  n       -       y       -       -       smtpd
+  -o syslog_name=postfix/smtps
+  -o smtpd_tls_wrappermode=yes
+  -o smtpd_sasl_auth_enable=yes
+  -o smtpd_reject_unlisted_recipient=no
+  -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
+  -o milter_macro_daemon_name=ORIGINATING
+pickup    unix  n       -       y       60      1       pickup
+cleanup   unix  n       -       y       -       0       cleanup
+qmgr      unix  n       -       n       300     1       qmgr
+tlsmgr    unix  -       -       y       1000?   1       tlsmgr
+rewrite   unix  -       -       y       -       -       trivial-rewrite
+bounce    unix  -       -       y       -       0       bounce
+defer     unix  -       -       y       -       0       bounce
+trace     unix  -       -       y       -       0       bounce
+verify    unix  -       -       y       -       1       verify
+flush     unix  n       -       y       1000?   0       flush
+proxymap  unix  -       -       n       -       -       proxymap
+proxywrite unix -       -       n       -       1       proxymap
+smtp      unix  -       -       y       -       -       smtp
+relay     unix  -       -       y       -       -       smtp
+showq     unix  n       -       y       -       -       showq
+error     unix  -       -       y       -       -       error
+retry     unix  -       -       y       -       -       error
+discard   unix  -       -       y       -       -       discard
+local     unix  -       n       n       -       -       local
+virtual   unix  -       n       n       -       -       virtual
+lmtp      unix  -       -       y       -       -       lmtp
+anvil     unix  -       -       y       -       1       anvil
+scache    unix  -       -       y       -       1       scache"
+
+execute_ssh "echo '$POSTFIX_MASTER_CONFIG' > /etc/postfix/master.cf"
+
+# 配置防火墙规则
+echo "配置防火墙规则..."
+execute_ssh "iptables -A INPUT -p tcp --dport 25 -j ACCEPT
+iptables -A INPUT -p tcp --dport 465 -j ACCEPT
+iptables -A INPUT -p tcp --dport 587 -j ACCEPT
+iptables-save > /etc/iptables/rules.v4"
 
 # 6. 配置Dovecot
 echo "5. 配置Dovecot..."
@@ -129,7 +180,7 @@ echo "
    mail.$DOMAIN_NAME -> $SERVER_IP
 
 2. MX记录：
-   @ -> mail.$DOMAIN_NAME (优先级：10)
+   @ -> mail.$DOMAIN_NAME (优先级：10）
 
 3. SPF记录 (TXT记录)：
    @ -> "v=spf1 mx -all"

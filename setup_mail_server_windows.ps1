@@ -43,7 +43,7 @@ Execute-SSH "hostnamectl set-hostname mail.$DomainName"
 # 3. 安装必要软件
 Write-Host "3. 安装必要软件..."
 Execute-SSH @"
-DEBIAN_FRONTEND=noninteractive apt install -y postfix dovecot-imapd dovecot-pop3d certbot nginx
+DEBIAN_FRONTEND=noninteractive apt install -y postfix dovecot-imapd dovecot-pop3d certbot nginx iptables-persistent
 "@
 
 # 4. 配置Postfix
@@ -88,6 +88,61 @@ mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128
 "@
 
 Execute-SSH "echo '$postfixConfig' > /etc/postfix/main.cf"
+
+# 配置master.cf
+Write-Host "配置Postfix master.cf..."
+$postfixMasterConfig = @"
+smtp      inet  n       -       y       -       -       smtpd
+submission inet n       -       y       -       -       smtpd
+  -o syslog_name=postfix/submission
+  -o smtpd_tls_security_level=encrypt
+  -o smtpd_sasl_auth_enable=yes
+  -o smtpd_tls_auth_only=yes
+  -o smtpd_reject_unlisted_recipient=no
+  -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
+  -o milter_macro_daemon_name=ORIGINATING
+smtps     inet  n       -       y       -       -       smtpd
+  -o syslog_name=postfix/smtps
+  -o smtpd_tls_wrappermode=yes
+  -o smtpd_sasl_auth_enable=yes
+  -o smtpd_reject_unlisted_recipient=no
+  -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
+  -o milter_macro_daemon_name=ORIGINATING
+pickup    unix  n       -       y       60      1       pickup
+cleanup   unix  n       -       y       -       0       cleanup
+qmgr      unix  n       -       n       300     1       qmgr
+tlsmgr    unix  -       -       y       1000?   1       tlsmgr
+rewrite   unix  -       -       y       -       -       trivial-rewrite
+bounce    unix  -       -       y       -       0       bounce
+defer     unix  -       -       y       -       0       bounce
+trace     unix  -       -       y       -       0       bounce
+verify    unix  -       -       y       -       1       verify
+flush     unix  n       -       y       1000?   0       flush
+proxymap  unix  -       -       n       -       -       proxymap
+proxywrite unix -       -       n       -       1       proxymap
+smtp      unix  -       -       y       -       -       smtp
+relay     unix  -       -       y       -       -       smtp
+showq     unix  n       -       y       -       -       showq
+error     unix  -       -       y       -       -       error
+retry     unix  -       -       y       -       -       error
+discard   unix  -       -       y       -       -       discard
+local     unix  -       n       n       -       -       local
+virtual   unix  -       n       n       -       -       virtual
+lmtp      unix  -       -       y       -       -       lmtp
+anvil     unix  -       -       y       -       1       anvil
+scache    unix  -       -       y       -       1       scache
+"@
+
+Execute-SSH "echo '$postfixMasterConfig' > /etc/postfix/master.cf"
+
+# 配置防火墙规则
+Write-Host "配置防火墙规则..."
+Execute-SSH @"
+iptables -A INPUT -p tcp --dport 25 -j ACCEPT
+iptables -A INPUT -p tcp --dport 465 -j ACCEPT
+iptables -A INPUT -p tcp --dport 587 -j ACCEPT
+iptables-save > /etc/iptables/rules.v4
+"@
 
 # 5. 配置Dovecot
 Write-Host "5. 配置Dovecot..."
@@ -160,9 +215,17 @@ Write-Host @"
 密码：Admin123!@#
 
 邮件客户端配置：
-IMAP: mail.$DomainName:993 (SSL/TLS)
-SMTP: mail.$DomainName:587 (STARTTLS)
-POP3: mail.$DomainName:995 (SSL/TLS)
+- IMAP: mail.$DomainName:993 (SSL/TLS)
+- SMTP (提交): mail.$DomainName:587 (STARTTLS)
+- SMTP (安全): mail.$DomainName:465 (SSL/TLS)
+- POP3: mail.$DomainName:995 (SSL/TLS)
+
+端口说明：
+- 端口25: 用于服务器间邮件传输
+- 端口465: 用于安全SMTP连接（SSL/TLS）
+- 端口587: 用于客户端邮件提交（STARTTLS）
+- 端口993: 用于安全IMAP连接（SSL/TLS）
+- 端口995: 用于安全POP3连接（SSL/TLS）
 
 安装完成！您可以访问以下地址：
 
