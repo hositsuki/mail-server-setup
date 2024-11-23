@@ -9,7 +9,10 @@ param(
     [string]$Password,
     
     [Parameter(Mandatory=$true)]
-    [string]$DomainName
+    [string]$DomainName,
+
+    [Parameter(Mandatory=$true)]
+    [string]$AdminEmail
 )
 
 # 检查是否安装了PuTTY
@@ -103,7 +106,7 @@ auth_mechanisms = plain login
 Write-Host "6. 获取SSL证书..."
 Execute-SSH @"
 systemctl stop nginx
-certbot certonly --standalone -d mail.$DomainName --non-interactive --agree-tos --email admin@$DomainName
+certbot certonly --standalone -d mail.$DomainName --non-interactive --agree-tos --email $AdminEmail
 "@
 
 # 7. 配置SSL
@@ -119,8 +122,21 @@ ssl_min_protocol = TLSv1.2' > /etc/dovecot/conf.d/10-ssl.conf
 Write-Host "8. 创建管理员账户..."
 Execute-SSH "useradd -m -s /bin/bash admin && echo 'admin:Admin123!@#' | chpasswd"
 
-# 9. 重启服务
-Write-Host "9. 重启服务..."
+# 9. 安装Webmail和用户管理界面
+Write-Host "安装Webmail和用户管理界面..."
+Execute-SSH "bash /scripts/install_webmail.sh $DomainName $AdminEmail"
+
+# 10. 安装监控系统
+Write-Host "安装监控系统..."
+Execute-SSH "bash /scripts/setup_monitoring.sh $DomainName $AdminEmail"
+
+# 11. 安装垃圾邮件过滤和DKIM签名
+Write-Host "安装垃圾邮件过滤和DKIM签名..."
+Execute-SSH "bash /root/scripts/setup_spam_filter.sh '$DomainName' '$AdminEmail'"
+Execute-SSH "bash /root/scripts/setup_dkim.sh '$DomainName' '$AdminEmail'"
+
+# 12. 重启服务
+Write-Host "12. 重启服务..."
 Execute-SSH "systemctl restart postfix && systemctl restart dovecot && systemctl start nginx"
 
 Write-Host @"
@@ -137,7 +153,7 @@ Write-Host @"
    @ -> "v=spf1 mx -all"
 
 4. DMARC记录 (TXT记录)：
-   _dmarc -> "v=DMARC1; p=quarantine; rua=mailto:admin@$DomainName"
+   _dmarc -> "v=DMARC1; p=quarantine; rua=mailto:$AdminEmail"
 
 默认管理员账户：
 用户名：admin
@@ -147,4 +163,36 @@ Write-Host @"
 IMAP: mail.$DomainName:993 (SSL/TLS)
 SMTP: mail.$DomainName:587 (STARTTLS)
 POP3: mail.$DomainName:995 (SSL/TLS)
+
+安装完成！您可以访问以下地址：
+
+1. Webmail界面: https://mail.$DomainName/webmail
+2. 管理界面: https://mail.$DomainName/postfixadmin
+3. 监控界面: http://mail.$DomainName:3000
+
+默认账户信息：
+- 邮箱管理员: admin@$DomainName
+- 密码: Admin123!@#
+- Grafana管理员: admin
+- Grafana密码: admin
+
+请务必修改所有默认密码！
+
+监控功能：
+- 邮件队列监控
+- 磁盘使用率监控
+- 连接数监控
+- 错误日志监控
+- 自动备份（每天凌晨2点）
+- 日志轮转（每天）
+
+配置文件位置：
+- Postfix: /etc/postfix/
+- Dovecot: /etc/dovecot/
+- Webmail: /var/www/html/webmail/
+- 监控: /etc/prometheus/
+
+备份位置：/var/backups/mail/
+
+如需帮助，请查看文档或联系支持。
 "@

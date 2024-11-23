@@ -12,6 +12,7 @@ read -p "请输入SSH用户名: " SSH_USER
 read -s -p "请输入SSH密码: " SSH_PASS
 echo ""
 read -p "请输入您的域名(例如: example.com): " DOMAIN_NAME
+read -p "请输入管理员邮箱: " ADMIN_EMAIL
 
 # SSH命令函数
 execute_ssh() {
@@ -107,7 +108,20 @@ execute_ssh "useradd -m -s /bin/bash admin && echo 'admin:Admin123!@#' | chpassw
 echo "9. 重启服务..."
 execute_ssh "systemctl restart postfix && systemctl restart dovecot && systemctl start nginx"
 
-cat << EOF
+# 安装垃圾邮件过滤和DKIM签名
+echo "安装垃圾邮件过滤和DKIM签名..."
+bash scripts/setup_spam_filter.sh "$DOMAIN_NAME" "$ADMIN_EMAIL"
+bash scripts/setup_dkim.sh "$DOMAIN_NAME" "$ADMIN_EMAIL"
+
+# 安装Webmail和用户管理界面
+echo "安装Webmail和用户管理界面..."
+bash scripts/install_webmail.sh "$DOMAIN_NAME" "$ADMIN_EMAIL"
+
+# 安装监控系统
+echo "安装监控系统..."
+bash scripts/setup_monitoring.sh "$DOMAIN_NAME" "$ADMIN_EMAIL"
+
+echo "
 邮件服务器配置完成！
 
 请在您的DNS管理面板中添加以下记录：
@@ -131,4 +145,36 @@ cat << EOF
 IMAP: mail.$DOMAIN_NAME:993 (SSL/TLS)
 SMTP: mail.$DOMAIN_NAME:587 (STARTTLS)
 POP3: mail.$DOMAIN_NAME:995 (SSL/TLS)
-EOF
+
+安装完成！您可以访问以下地址：
+
+1. Webmail界面: https://mail.$DOMAIN_NAME/webmail
+2. 管理界面: https://mail.$DOMAIN_NAME/postfixadmin
+3. 监控界面: http://mail.$DOMAIN_NAME:3000
+
+默认账户信息：
+- 邮箱管理员: admin@$DOMAIN_NAME
+- 密码: Admin123!@#
+- Grafana管理员: admin
+- Grafana密码: admin
+
+请务必修改所有默认密码！
+
+监控功能：
+- 邮件队列监控
+- 磁盘使用率监控
+- 连接数监控
+- 错误日志监控
+- 自动备份（每天凌晨2点）
+- 日志轮转（每天）
+
+配置文件位置：
+- Postfix: /etc/postfix/
+- Dovecot: /etc/dovecot/
+- Webmail: /var/www/html/webmail/
+- 监控: /etc/prometheus/
+
+备份位置：/var/backups/mail/
+
+如需帮助，请查看文档或联系支持。
+"
